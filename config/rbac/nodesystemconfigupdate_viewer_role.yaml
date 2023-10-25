@@ -1,0 +1,27 @@
+# permissions for end users to view nodesystemconfigupdates.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: nodesystemconfigupdate-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: masters-degree
+    app.kubernetes.io/part-of: masters-degree
+    app.kubernetes.io/managed-by: kustomize
+  name: nodesystemconfigupdate-viewer-role
+rules:
+- apiGroups:
+  - system.masters.degree
+  resources:
+  - nodesystemconfigupdates
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - system.masters.degree
+  resources:
+  - nodesystemconfigupdates/status
+  verbs:
+  - get

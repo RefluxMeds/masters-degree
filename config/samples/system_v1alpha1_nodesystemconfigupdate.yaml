@@ -1,0 +1,45 @@
+apiVersion: system.masters.degree/v1alpha1
+kind: NodeSystemConfigUpdate
+metadata:
+  labels:
+    app.kubernetes.io/name: nodesystemconfigupdate
+    app.kubernetes.io/instance: nodesystemconfigupdate-sample
+    app.kubernetes.io/part-of: masters-degree
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: masters-degree
+  name: nodesystemconfigupdate-sample
+spec:
+  nodeSelector:
+    key1: value1
+    key2: value2
+  sysctl:
+    fs:
+      inotify:
+        max_queued_events: int
+        max_user_instances: int
+        max_user_watches: int
+    kernel:
+      core_pattern: string
+      sched_rt_runtime_us: int
+    net:
+      core:
+        rmem_default: int
+        rmem_max: int
+        wmem_default: int
+        wmem_max: int
+      ipv4:
+        tcp_mem: []int
+        tcp_rmem: []int
+        tcp_slow_start_after_idle: int
+        tcp_wmem: []int
+        udp_mem: []int
+        udp_rmem_min: int
+        udp_wmem_min: int
+      netfilter:
+        nf_conntrack_tcp_timeout_max_retrans: int 
+        nf_conntrack_tcp_timeout_unacknowledged: int
+      sctp:
+        auth_enable: int
+        sctp_mem: []int
+    vm:
+      max_map_count: int

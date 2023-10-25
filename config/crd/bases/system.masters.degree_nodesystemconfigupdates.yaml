@@ -1,0 +1,135 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: nodesystemconfigupdates.system.masters.degree
+spec:
+  group: system.masters.degree
+  names:
+    kind: NodeSystemConfigUpdate
+    listKind: NodeSystemConfigUpdateList
+    plural: nodesystemconfigupdates
+    singular: nodesystemconfigupdate
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: NodeSystemConfigUpdate is the Schema for the nodesystemconfigupdates
+          API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NodeSystemConfigUpdateSpec defines the desired state of NodeSystemConfigUpdate
+            properties:
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: Foo is an example field of NodeSystemConfigUpdate. Edit
+                  nodesystemconfigupdate_types.go to remove/update
+                type: object
+              sysctl:
+                properties:
+                  fs:
+                    properties:
+                      inotify:
+                        properties:
+                          max_queued_events:
+                            type: integer
+                          max_user_instances:
+                            type: integer
+                          max_user_watches:
+                            type: integer
+                        type: object
+                    type: object
+                  kernel:
+                    properties:
+                      core_pattern:
+                        type: string
+                      sched_rt_runtime_us:
+                        type: integer
+                    type: object
+                  net:
+                    properties:
+                      core:
+                        properties:
+                          rmem_default:
+                            type: integer
+                          rmem_max:
+                            type: integer
+                          wmem_default:
+                            type: integer
+                          wmem_max:
+                            type: integer
+                        type: object
+                      ipv4:
+                        properties:
+                          tcp_mem:
+                            items:
+                              type: integer
+                            type: array
+                          tcp_rmem:
+                            items:
+                              type: integer
+                            type: array
+                          tcp_slow_start_after_idle:
+                            type: integer
+                          tcp_wmem:
+                            items:
+                              type: integer
+                            type: array
+                          udp_mem:
+                            items:
+                              type: integer
+                            type: array
+                          udp_rmem_min:
+                            type: integer
+                          udp_wmem_min:
+                            type: integer
+                        type: object
+                      netfilter:
+                        properties:
+                          nf_conntrack_tcp_timeout_max_retrans:
+                            type: integer
+                          nf_conntrack_tcp_timeout_unacknowledged:
+                            type: integer
+                        type: object
+                      sctp:
+                        properties:
+                          auth_enable:
+                            type: integer
+                          sctp_mem:
+                            items:
+                              type: integer
+                            type: array
+                        type: object
+                    type: object
+                  vm:
+                    properties:
+                      max_map_count:
+                        type: integer
+                    type: object
+                type: object
+            type: object
+          status:
+            description: NodeSystemConfigUpdateStatus defines the observed state of
+              NodeSystemConfigUpdate
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

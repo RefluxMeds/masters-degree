@@ -7,4 +7,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: masters-degree
 repo: github.com/RefluxMeds/masters-degree
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: masters.degree
+  group: system
+  kind: NodeSystemConfigUpdate
+  path: github.com/RefluxMeds/masters-degree/api/v1alpha1
+  version: v1alpha1
 version: "3"

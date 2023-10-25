@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- system_v1alpha1_nodesystemconfigupdate.yaml
+#+kubebuilder:scaffold:manifestskustomizesamples
