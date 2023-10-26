@@ -10,36 +10,36 @@ metadata:
   name: nodesystemconfigupdate-sample
 spec:
   nodeSelector:
-    key1: value1
-    key2: value2
+    kubernetes.io/os: "linux"
+    kubernetes.io/arch: "amd64"
   sysctl:
     fs:
       inotify:
-        max_queued_events: int
-        max_user_instances: int
-        max_user_watches: int
+        max_queued_events: 16384
+        max_user_instances: 128
+        max_user_watches: 119346
     kernel:
-      core_pattern: string
-      sched_rt_runtime_us: int
+      core_pattern: "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h"
+      sched_rt_runtime_us: 950000
     net:
       core:
-        rmem_default: int
-        rmem_max: int
-        wmem_default: int
-        wmem_max: int
+        rmem_default: 212992
+        rmem_max: 212992
+        wmem_default: 212992
+        wmem_max: 212992
       ipv4:
-        tcp_mem: []int
-        tcp_rmem: []int
-        tcp_slow_start_after_idle: int
-        tcp_wmem: []int
-        udp_mem: []int
-        udp_rmem_min: int
-        udp_wmem_min: int
+        tcp_mem: [186747, 248999, 373494]
+        tcp_rmem: [4096, 131072, 6291456]
+        tcp_slow_start_after_idle: 1
+        tcp_wmem: [4096, 16384, 4194304]
+        udp_mem: [373497, 497998, 746994]
+        udp_rmem_min: 4096
+        udp_wmem_min: 4096
       netfilter:
-        nf_conntrack_tcp_timeout_max_retrans: int 
-        nf_conntrack_tcp_timeout_unacknowledged: int
+        nf_conntrack_tcp_timeout_max_retrans: 300 
+        nf_conntrack_tcp_timeout_unacknowledged: 300
       sctp:
-        auth_enable: int
-        sctp_mem: []int
+        auth_enable: 0
+        sctp_mem: [24709599, 32946135, 49419198]
     vm:
-      max_map_count: int
+      max_map_count: 65530

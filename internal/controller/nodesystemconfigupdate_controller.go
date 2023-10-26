@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -25,7 +26,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	systemv1alpha1 "github.com/RefluxMeds/masters-degree/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
+
+// Custom functions written
+func mapsMatch(mapSelector, mapNode map[string]string) bool {
+	for key, valueSelector := range mapSelector {
+		valueNode, exists := mapNode[key]
+
+		if !exists || valueSelector != valueNode {
+			return false
+		}
+	}
+
+	return true
+}
 
 // NodeSystemConfigUpdateReconciler reconciles a NodeSystemConfigUpdate object
 type NodeSystemConfigUpdateReconciler struct {
@@ -47,11 +62,33 @@ type NodeSystemConfigUpdateReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.0/pkg/reconcile
 func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	l := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	nodeSysConfUpdate := &systemv1alpha1.NodeSystemConfigUpdate{}
+	nodeData := &corev1.Node{}
+	// nodeName := os.Getenv("NODENAME")
+	nodeName := "worker-node"
 
-	return ctrl.Result{}, nil
+	if err := r.Get(ctx, req.NamespacedName, nodeSysConfUpdate); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if err := r.Get(ctx, client.ObjectKey{Name: nodeName}, nodeData); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	nodeSelector := nodeSysConfUpdate.Spec.NodeSelector
+	nodeLabels := nodeData.GetLabels()
+
+	if mapsMatch(nodeSelector, nodeLabels) {
+		l.Info("MatchedNodeLabels", "SelectorLabel", nodeSelector, "NodeLabel", nodeLabels)
+	} else {
+		l.Info("CheckingNodeLabels", "SelectorLabel", nodeSelector, "NodeLabel", nodeLabels)
+	}
+
+	//if err := r.Update(ctx, nodeSysConfUpdate)
+
+	return ctrl.Result{Requeue: true, RequeueAfter: 15 * time.Second}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

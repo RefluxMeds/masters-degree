@@ -98,5 +98,10 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
+        env: 
+          - name: NODENAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
