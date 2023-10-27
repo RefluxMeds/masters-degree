@@ -12,7 +12,7 @@ metadata:
   name: system
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: controller-manager
   namespace: system
@@ -28,7 +28,7 @@ spec:
   selector:
     matchLabels:
       control-plane: controller-manager
-  replicas: 1
+#  replicas: 1
   template:
     metadata:
       annotations:
@@ -68,15 +68,20 @@ spec:
       containers:
       - command:
         - /manager
-        args:
-        - --leader-elect
-        image: controller:latest
+#        args:
+#        - --leader-elect
+        image: docker.io/refluxmeds/masters-degree-controller
         name: manager
+        volumeMounts:
+        - name: sysctls
+          mountPath: /sysctls
         securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-              - "ALL"
+          privileged: true
+#          procMount: Unmasked
+#          allowPrivilegeEscalation: false
+#          capabilities:
+#            drop:
+#              - "ALL"
         livenessProbe:
           httpGet:
             path: /healthz
@@ -105,3 +110,8 @@ spec:
                 fieldPath: spec.nodeName
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
+      volumes:
+      - name: sysctls
+        hostPath:
+          path: /proc/sys
+          type: Directory

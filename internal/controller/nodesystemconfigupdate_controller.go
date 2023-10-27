@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -51,6 +52,8 @@ type NodeSystemConfigUpdateReconciler struct {
 //+kubebuilder:rbac:groups=system.masters.degree,resources=nodesystemconfigupdates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=system.masters.degree,resources=nodesystemconfigupdates/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=system.masters.degree,resources=nodesystemconfigupdates/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=nodes/status,verbs=get
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -66,8 +69,7 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 
 	nodeSysConfUpdate := &systemv1alpha1.NodeSystemConfigUpdate{}
 	nodeData := &corev1.Node{}
-	// nodeName := os.Getenv("NODENAME")
-	nodeName := "worker-node"
+	nodeName := os.Getenv("NODENAME")
 
 	if err := r.Get(ctx, req.NamespacedName, nodeSysConfUpdate); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
