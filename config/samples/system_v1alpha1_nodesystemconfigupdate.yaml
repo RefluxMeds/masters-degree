@@ -17,10 +17,10 @@ spec:
       inotify:
         max_queued_events: 16384
         max_user_instances: 128
-        max_user_watches: 119346
+        max_user_watches: 8192
     kernel:
       core_pattern: "|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h"
-      sched_rt_runtime_us: 950000
+      sched_rt_runtime_us: 950001
     net:
       core:
         rmem_default: 212992
@@ -28,18 +28,18 @@ spec:
         wmem_default: 212992
         wmem_max: 212992
       ipv4:
-        tcp_mem: [186747, 248999, 373494]
+        tcp_mem: [44394, 59194, 88788]
         tcp_rmem: [4096, 131072, 6291456]
         tcp_slow_start_after_idle: 1
         tcp_wmem: [4096, 16384, 4194304]
-        udp_mem: [373497, 497998, 746994]
+        udp_mem: [88791, 118389, 177582]
         udp_rmem_min: 4096
         udp_wmem_min: 4096
       netfilter:
         nf_conntrack_tcp_timeout_max_retrans: 300 
         nf_conntrack_tcp_timeout_unacknowledged: 300
-      sctp:
-        auth_enable: 0
-        sctp_mem: [24709599, 32946135, 49419198]
+#      sctp:
+#        auth_enable: 0
+#        sctp_mem: [24709599, 32946135, 49419198]
     vm:
       max_map_count: 65530

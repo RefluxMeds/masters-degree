@@ -18,8 +18,12 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"reflect"
+	"strings"
 	"time"
+	"unicode"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -41,6 +45,92 @@ func mapsMatch(mapSelector, mapNode map[string]string) bool {
 	}
 
 	return true
+}
+
+func insertUnderscored(input string) string {
+	var result strings.Builder
+
+	for i, char := range input {
+		if i > 0 && unicode.IsUpper(char) {
+			result.WriteRune('_')
+		}
+		result.WriteRune(char)
+	}
+
+	return result.String()
+}
+
+func processSysctlParameters(sysctls systemv1alpha1.Sysctl, basePath string) error {
+	err := processSysctlFields(sysctls, basePath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func processSysctlFields(field interface{}, basePath string) error {
+	value := reflect.ValueOf(field)
+
+	if !value.IsValid() {
+		return nil
+	}
+
+	if value.Kind() == reflect.Struct {
+		for i := 0; i < value.NumField(); i++ {
+			subfield := value.Field(i).Interface()
+			fieldName := value.Type().Field(i).Name
+
+			fieldNameUnderscore := insertUnderscored(fieldName)
+
+			subpath := strings.Join([]string{basePath, fieldNameUnderscore}, "/")
+
+			if err := processSysctlFields(subfield, subpath); err != nil {
+				return err
+			}
+		}
+	} else {
+		//fieldName := basePath[strings.LastIndex(basePath, "/")+1:]
+		//filePath := strings.Join([]string{basePath, fieldName}, "/")
+
+		currentValue, err := readValueFromFile(strings.ToLower(basePath))
+		if err != nil {
+			return err
+		}
+
+		desiredValue := fmt.Sprintf("%v", value)
+		if desiredValue != currentValue {
+			err = writeValueToFile(strings.ToLower(basePath), field)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func readValueFromFile(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
+}
+
+func writeValueToFile(filePath string, value interface{}) error {
+	file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	strValue := fmt.Sprintf("%v", value)
+	_, err = file.WriteString(strValue)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // NodeSystemConfigUpdateReconciler reconciles a NodeSystemConfigUpdate object
@@ -83,9 +173,17 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 	nodeLabels := nodeData.GetLabels()
 
 	if mapsMatch(nodeSelector, nodeLabels) {
-		l.Info("MatchedNodeLabels", "SelectorLabel", nodeSelector, "NodeLabel", nodeLabels)
+		//		l.Info("RUNNING_AS", "UID", os.Geteuid())
+		//		l.Info("MATCHED_NODE", "SelectorLabel", nodeSelector, "NodeLabel", nodeLabels)
+		//		l.Info("ShowRestOfSpec", "SysctlSpec", nodeSysConfUpdate.Spec.Sysctl)
+		err := processSysctlParameters(nodeSysConfUpdate.Spec.Sysctl, "/sysctls")
+		if err != nil {
+			l.Info("ERROR", "CannotProcess", err)
+		} else {
+			l.Info("ValidatedAndWritten", "Processed", nodeSysConfUpdate.Spec.Sysctl)
+		}
 	} else {
-		l.Info("CheckingNodeLabels", "SelectorLabel", nodeSelector, "NodeLabel", nodeLabels)
+		l.Info("NO_NODE_MATCH", "SelectorLabel", nodeSelector, "NodeLabel", nodeLabels)
 	}
 
 	//if err := r.Update(ctx, nodeSysConfUpdate)

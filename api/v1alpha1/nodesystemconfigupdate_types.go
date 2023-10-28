@@ -36,7 +36,7 @@ type CoreNet struct {
 	WmemMax     int `json:"wmem_max,omitempty"`
 }
 
-type IPv4Net struct {
+type Ipv4Net struct {
 	TcpMem                []int `json:"tcp_mem,omitempty"`
 	TcpRmem               []int `json:"tcp_rmem,omitempty"`
 	TcpSlowStartAfterIdle int   `json:"tcp_slow_start_after_idle,omitempty"`
@@ -51,7 +51,7 @@ type NetfilterNet struct {
 	NfConntrackTcpTimeoutUnacknowledged int `json:"nf_conntrack_tcp_timeout_unacknowledged,omitempty"`
 }
 
-type SCTPNet struct {
+type SctpNet struct {
 	AuthEnable int   `json:"auth_enable,omitempty"`
 	SctpMem    []int `json:"sctp_mem,omitempty"`
 }
@@ -67,9 +67,9 @@ type KernelSysctl struct {
 
 type NetSysctl struct {
 	Core      CoreNet      `json:"core,omitempty"`
-	IPv4      IPv4Net      `json:"ipv4,omitempty"`
+	Ipv4      Ipv4Net      `json:"ipv4,omitempty"`
 	Netfilter NetfilterNet `json:"netfilter,omitempty"`
-	SCTP      SCTPNet      `json:"sctp,omitempty"`
+	Sctp      SctpNet      `json:"sctp,omitempty"`
 }
 
 type VmSysctl struct {
