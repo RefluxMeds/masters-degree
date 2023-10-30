@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -60,18 +61,34 @@ func insertUnderscored(input string) string {
 	return result.String()
 }
 
+func convertToString(value reflect.Value) string {
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(value.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(value.Uint(), 10)
+	case reflect.Float32, reflect.Float64:
+		return strconv.FormatFloat(value.Float(), 'f', -1, value.Type().Bits())
+	case reflect.String:
+		return value.String()
+	default:
+		return fmt.Sprintf("%v", value.Interface())
+	}
+}
+
 func processSysctlParameters(sysctls systemv1alpha1.Sysctl, basePath string) error {
 	err := processSysctlFields(sysctls, basePath)
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
 func processSysctlFields(field interface{}, basePath string) error {
 	value := reflect.ValueOf(field)
 
-	if !value.IsValid() {
+	if !value.IsValid() || value.IsZero() {
 		return nil
 	}
 
@@ -88,6 +105,28 @@ func processSysctlFields(field interface{}, basePath string) error {
 				return err
 			}
 		}
+
+	} else if value.Kind() == reflect.Slice || value.Kind() == reflect.Array {
+		sliceValues := []string{}
+		for i := 0; i < value.Len(); i++ {
+			element := value.Index(i)
+			elementString := convertToString(element)
+			sliceValues = append(sliceValues, elementString)
+		}
+		sliceValueString := strings.Join(sliceValues, "\t")
+
+		currentValue, err := readValueFromFile(strings.ToLower(basePath))
+		if err != nil {
+			return err
+		}
+
+		if sliceValueString != currentValue {
+			err = writeValueToFile(strings.ToLower(basePath), sliceValueString)
+			if err != nil {
+				return err
+			}
+		}
+
 	} else {
 		//fieldName := basePath[strings.LastIndex(basePath, "/")+1:]
 		//filePath := strings.Join([]string{basePath, fieldName}, "/")
@@ -159,31 +198,59 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 
 	nodeSysConfUpdate := &systemv1alpha1.NodeSystemConfigUpdate{}
 	nodeData := &corev1.Node{}
-	nodeName := os.Getenv("NODENAME")
 
 	if err := r.Get(ctx, req.NamespacedName, nodeSysConfUpdate); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if err := r.Get(ctx, client.ObjectKey{Name: nodeName}, nodeData); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Name: os.Getenv("NODENAME")}, nodeData); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	nodeSelector := nodeSysConfUpdate.Spec.NodeSelector
-	nodeLabels := nodeData.GetLabels()
-
-	if mapsMatch(nodeSelector, nodeLabels) {
-		//		l.Info("RUNNING_AS", "UID", os.Geteuid())
-		//		l.Info("MATCHED_NODE", "SelectorLabel", nodeSelector, "NodeLabel", nodeLabels)
-		//		l.Info("ShowRestOfSpec", "SysctlSpec", nodeSysConfUpdate.Spec.Sysctl)
+	if mapsMatch(nodeSysConfUpdate.Spec.NodeSelector, nodeData.GetLabels()) {
 		err := processSysctlParameters(nodeSysConfUpdate.Spec.Sysctl, "/sysctls")
 		if err != nil {
-			l.Info("ERROR", "CannotProcess", err)
+			l.Info("NODE_MATCH", "SELECTOR", nodeSysConfUpdate.Spec.NodeSelector)
+			l.Info("NOT_PROCESSED", "CONFIG", nodeSysConfUpdate.ObjectMeta.Name, "ERROR", err)
 		} else {
-			l.Info("ValidatedAndWritten", "Processed", nodeSysConfUpdate.Spec.Sysctl)
+			l.Info("NODE_MATCH", "SELECTOR", nodeSysConfUpdate.Spec.NodeSelector)
+
+			// Update Status fields
+			nodeSysConfUpdate.Status.LastUpdateTime = time.Now().Format(time.RFC3339)
+			if nodeSysConfUpdate.Status.NodesConfigured == nil {
+				nodeSysConfUpdate.Status.NodesConfigured = make(map[string]bool)
+			}
+
+			if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
+				// Node not configured, so set it as configured
+				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = true
+			}
+
+			if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			l.Info("PROCESSED", "CONFIG", nodeSysConfUpdate.ObjectMeta.Name)
 		}
 	} else {
-		l.Info("NO_NODE_MATCH", "SelectorLabel", nodeSelector, "NodeLabel", nodeLabels)
+		l.Info("NO_NODE_MATCH", "SELECTOR", nodeSysConfUpdate.Spec.NodeSelector)
+
+		// Update Status fields
+		nodeSysConfUpdate.Status.LastUpdateTime = time.Now().Format(time.RFC3339)
+		if nodeSysConfUpdate.Status.NodesConfigured == nil {
+			nodeSysConfUpdate.Status.NodesConfigured = make(map[string]bool)
+		}
+
+		if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
+			// Node not configured, so set it as configured
+			nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = false
+		}
+
+		if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		l.Info("NOT_PROCESSED", "CONFIG", nodeSysConfUpdate.ObjectMeta.Name)
 	}
 
 	//if err := r.Update(ctx, nodeSysConfUpdate)

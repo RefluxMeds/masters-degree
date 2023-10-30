@@ -88,7 +88,6 @@ type NodeSystemConfigUpdateSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of NodeSystemConfigUpdate. Edit nodesystemconfigupdate_types.go to remove/update
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	Sysctl       Sysctl            `json:"sysctl,omitempty"`
 }
@@ -97,6 +96,10 @@ type NodeSystemConfigUpdateSpec struct {
 type NodeSystemConfigUpdateStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	LastUpdateTime  string          `json:"lastUpdateTime,omitempty"`
+	NodesConfigured map[string]bool `json:"nodesConfigured,omitempty"`
+	//AppliedConfigurationDetails Sysctl    `json:"sysctl,omitempty"`
 }
 
 //+kubebuilder:object:root=true
