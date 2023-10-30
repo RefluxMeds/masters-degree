@@ -224,6 +224,8 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 			if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
 				// Node not configured, so set it as configured
 				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = true
+			} else {
+				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = true
 			}
 
 			if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
@@ -242,7 +244,8 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 		}
 
 		if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
-			// Node not configured, so set it as configured
+			nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = false
+		} else {
 			nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = false
 		}
 
@@ -252,8 +255,6 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 
 		l.Info("NOT_PROCESSED", "CONFIG", nodeSysConfUpdate.ObjectMeta.Name)
 	}
-
-	//if err := r.Update(ctx, nodeSysConfUpdate)
 
 	return ctrl.Result{Requeue: true, RequeueAfter: 15 * time.Second}, nil
 }
