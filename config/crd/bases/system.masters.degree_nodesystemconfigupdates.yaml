@@ -35,6 +35,13 @@ spec:
           spec:
             description: NodeSystemConfigUpdateSpec defines the desired state of NodeSystemConfigUpdate
             properties:
+              hugepages:
+                properties:
+                  hugepages-1Gi:
+                    type: integer
+                  hugepages-2Mi:
+                    type: integer
+                type: object
               nodeSelector:
                 additionalProperties:
                   type: string
@@ -130,7 +137,9 @@ spec:
                 type: string
               nodesConfigured:
                 additionalProperties:
-                  type: boolean
+                  additionalProperties:
+                    type: boolean
+                  type: object
                 type: object
             type: object
         type: object

@@ -21,15 +21,20 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	kubernetes "k8s.io/client-go/kubernetes"
+	rest "k8s.io/client-go/rest"
+	drain "k8s.io/kubectl/pkg/drain"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	systemv1alpha1 "github.com/RefluxMeds/masters-degree/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -172,17 +177,84 @@ func writeValueToFile(filePath string, value interface{}) error {
 	return nil
 }
 
+func processHugePages(hptype string, hpvalue int) (bool, error) {
+	grubFile := "/cfg/grub"
+
+	data, err := os.ReadFile(grubFile)
+	if err != nil {
+		return false, err
+	}
+
+	grubContents := string(data)
+	lines := strings.Split(grubContents, "\n")
+
+	re1Gi := regexp.MustCompile(`default_hugepagesz=1G hugepagesz=1G hugepages=\d+`)
+	re2Mi := regexp.MustCompile(`default_hugepagesz=2M hugepagesz=2M hugepages=\d+`)
+
+	hugepages := fmt.Sprintf("default_hugepagesz=%v hugepagesz=%v hugepages=%d", hptype, hptype, hpvalue)
+	for i, line := range lines {
+		if strings.Contains(line, "GRUB_CMDLINE_LINUX=") {
+			if strings.Contains(line, "GRUB_CMDLINE_LINUX=\"\"") {
+				lines[i] = fmt.Sprintf("GRUB_CMDLINE_LINUX=\"%s\"", hugepages)
+				newGrubContents := strings.Join(lines, "\n")
+				if err := os.WriteFile(grubFile, []byte(newGrubContents), 0644); err != nil {
+					return false, err
+				} else {
+					return true, nil
+				}
+			} else if strings.Contains(line, hugepages) {
+				return false, nil
+			} else if re2Mi.MatchString(line) {
+				lines[i] = re2Mi.ReplaceAllString(line, hugepages)
+				newGrubContents := strings.Join(lines, "\n")
+				if err := os.WriteFile(grubFile, []byte(newGrubContents), 0644); err != nil {
+					return false, err
+				} else {
+					return true, nil
+				}
+			} else if re1Gi.MatchString(line) {
+				lines[i] = re1Gi.ReplaceAllString(line, hugepages)
+				newGrubContents := strings.Join(lines, "\n")
+				if err := os.WriteFile(grubFile, []byte(newGrubContents), 0644); err != nil {
+					return false, err
+				} else {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
+}
+
+func onPodDeletedOrEvicted(pod *corev1.Pod, usingEviction bool) {
+	var verbString string
+	if usingEviction {
+		verbString = "Evicted"
+	} else {
+		verbString = "Deleted"
+	}
+
+	msg := fmt.Sprintf("Pod: %s:%s %s from node: %s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name, verbString, pod.Spec.NodeName)
+	fmt.Println(msg)
+}
+
 // NodeSystemConfigUpdateReconciler reconciles a NodeSystemConfigUpdate object
 type NodeSystemConfigUpdateReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	drainer *drain.Helper
 }
 
 //+kubebuilder:rbac:groups=system.masters.degree,resources=nodesystemconfigupdates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=system.masters.degree,resources=nodesystemconfigupdates/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=system.masters.degree,resources=nodesystemconfigupdates/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
-//+kubebuilder:rbac:groups="",resources=nodes/status,verbs=get
+//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups="",resources=nodes/status,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=pods/status,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="apps",resources=daemonsets,verbs=get;list;watch
+//+kubebuilder:rbac:groups="apps",resources=daemonsets/status,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -208,60 +280,161 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 	}
 
 	if mapsMatch(nodeSysConfUpdate.Spec.NodeSelector, nodeData.GetLabels()) {
-		err := processSysctlParameters(nodeSysConfUpdate.Spec.Sysctl, "/sysctls")
-		if err != nil {
-			l.Info("NODE_MATCH", "SELECTOR", nodeSysConfUpdate.Spec.NodeSelector)
-			l.Info("NOT_PROCESSED", "CONFIG", nodeSysConfUpdate.ObjectMeta.Name, "ERROR", err)
-		} else {
-			l.Info("NODE_MATCH", "SELECTOR", nodeSysConfUpdate.Spec.NodeSelector)
+		l.Info("NODE_MATCH", "SELECTOR", nodeSysConfUpdate.Spec.NodeSelector)
+	} else {
+		l.Info("NO_NODE_MATCH", "SELECTOR", nodeSysConfUpdate.Spec.NodeSelector)
+		nodeSysConfUpdate.Status.LastUpdateTime = time.Now().Format(time.RFC3339)
+		if nodeSysConfUpdate.Status.NodesConfigured == nil {
+			nodeSysConfUpdate.Status.NodesConfigured = make(map[string]map[string]bool)
+		}
 
-			// Update Status fields
+		if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
+			nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = make(map[string]bool)
+		}
+
+		nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["sysctlConfigured"] = false
+		nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["hugepagesConfigured"] = false
+		nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["rebootRequired"] = false
+
+		if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if mapsMatch(nodeSysConfUpdate.Spec.NodeSelector, nodeData.GetLabels()) {
+		err_sysctl := processSysctlParameters(nodeSysConfUpdate.Spec.Sysctl, "/sysctls")
+		if err_sysctl != nil {
+			l.Info("NOT_PROCESSED_SYSCTL", "SYSCTL_CONFIG", nodeSysConfUpdate.ObjectMeta.Name, "ERROR", err_sysctl)
+		} else {
 			nodeSysConfUpdate.Status.LastUpdateTime = time.Now().Format(time.RFC3339)
 			if nodeSysConfUpdate.Status.NodesConfigured == nil {
-				nodeSysConfUpdate.Status.NodesConfigured = make(map[string]bool)
+				nodeSysConfUpdate.Status.NodesConfigured = make(map[string]map[string]bool)
 			}
 
 			if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
-				// Node not configured, so set it as configured
-				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = true
-			} else {
-				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = true
+				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = make(map[string]bool)
 			}
+
+			nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["sysctlConfigured"] = true
 
 			if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
 				return ctrl.Result{}, err
 			}
 
-			l.Info("PROCESSED", "CONFIG", nodeSysConfUpdate.ObjectMeta.Name)
+			l.Info("PROCESSED_SYSCTL", "SYSCTL_CONFIG", nodeSysConfUpdate.ObjectMeta.Name)
 		}
-	} else {
-		l.Info("NO_NODE_MATCH", "SELECTOR", nodeSysConfUpdate.Spec.NodeSelector)
-
-		// Update Status fields
-		nodeSysConfUpdate.Status.LastUpdateTime = time.Now().Format(time.RFC3339)
-		if nodeSysConfUpdate.Status.NodesConfigured == nil {
-			nodeSysConfUpdate.Status.NodesConfigured = make(map[string]bool)
-		}
-
-		if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
-			nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = false
-		} else {
-			nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = false
-		}
-
-		if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		l.Info("NOT_PROCESSED", "CONFIG", nodeSysConfUpdate.ObjectMeta.Name)
 	}
 
-	return ctrl.Result{Requeue: true, RequeueAfter: 15 * time.Second}, nil
+	if mapsMatch(nodeSysConfUpdate.Spec.NodeSelector, nodeData.GetLabels()) {
+		if nodeSysConfUpdate.Spec.Hugepages.Hugepages1Gi != 0 && nodeSysConfUpdate.Spec.Hugepages.Hugepages2Mi == 0 {
+			reboot, err := processHugePages("1G", nodeSysConfUpdate.Spec.Hugepages.Hugepages1Gi)
+			if err != nil {
+				l.Info("NOT_PROCESSED_HUGEPAGES", "ERROR", err)
+			} else {
+				nodeSysConfUpdate.Status.LastUpdateTime = time.Now().Format(time.RFC3339)
+				if nodeSysConfUpdate.Status.NodesConfigured == nil {
+					nodeSysConfUpdate.Status.NodesConfigured = make(map[string]map[string]bool)
+				}
+
+				if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
+					nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = make(map[string]bool)
+				}
+
+				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["hugepagesConfigured"] = true
+
+				if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
+					return ctrl.Result{}, err
+				}
+
+				l.Info("PROCESSED_HUGEPAGES", "HUGEPAGE_CONFIG", nodeSysConfUpdate.Spec.Hugepages)
+			}
+
+			if reboot == true {
+				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["rebootRequired"] = true
+				if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
+
+		} else if nodeSysConfUpdate.Spec.Hugepages.Hugepages1Gi == 0 && nodeSysConfUpdate.Spec.Hugepages.Hugepages2Mi != 0 {
+			reboot, err := processHugePages("2M", nodeSysConfUpdate.Spec.Hugepages.Hugepages2Mi)
+			if err != nil {
+				l.Info("NOT_PROCESSED_HUGEPAGES", "ERROR", err)
+			} else {
+				nodeSysConfUpdate.Status.LastUpdateTime = time.Now().Format(time.RFC3339)
+				if nodeSysConfUpdate.Status.NodesConfigured == nil {
+					nodeSysConfUpdate.Status.NodesConfigured = make(map[string]map[string]bool)
+				}
+
+				if _, exists := nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]; !exists {
+					nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")] = make(map[string]bool)
+				}
+
+				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["hugepagesConfigured"] = true
+
+				if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
+					return ctrl.Result{}, err
+				}
+
+				l.Info("PROCESSED_HUGEPAGES", "HUGEPAGE_CONFIG", nodeSysConfUpdate.Spec.Hugepages)
+			}
+
+			if reboot == true {
+				nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["rebootRequired"] = true
+				if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
+		}
+	}
+
+	if nodeSysConfUpdate.ObjectMeta.Annotations["autoremediate"] == "true" &&
+		nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["rebootRequired"] == true {
+		l.Info("PROCESSING_AUTOREMEDIATION", "REBOOT_SEQ", nodeSysConfUpdate.ObjectMeta.Annotations["autoremediate"])
+
+		l.Info("PRINTVARS", "DRAINER", r.drainer, "NODENAME", nodeData.ObjectMeta.GetName())
+		if err := drain.RunCordonOrUncordon(r.drainer, nodeData, true); err != nil {
+			return ctrl.Result{}, err
+		}
+		l.Info("PRINTVARS", "DRAINER", r.drainer, "NODENAME", nodeData.ObjectMeta.GetName())
+		if err := drain.RunNodeDrain(r.drainer, nodeData.ObjectMeta.GetName()); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{Requeue: true, RequeueAfter: 30 * time.Second}, nil
+}
+
+func initDrainer(r *NodeSystemConfigUpdateReconciler, config *rest.Config) error {
+	r.drainer = &drain.Helper{}
+	r.drainer.Force = true
+	r.drainer.DeleteEmptyDirData = true
+	r.drainer.IgnoreAllDaemonSets = true
+	r.drainer.GracePeriodSeconds = -1
+	r.drainer.Timeout = time.Minute * 5
+
+	cs, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	r.drainer.Client = cs
+	r.drainer.Ctx = context.Background()
+
+	r.drainer.OnPodDeletedOrEvicted = onPodDeletedOrEvicted
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeSystemConfigUpdateReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	err := initDrainer(r, mgr.GetConfig())
+	if err != nil {
+		return err
+	}
+	pred := predicate.GenerationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&systemv1alpha1.NodeSystemConfigUpdate{}).
+		WithEventFilter(pred).
 		Complete(r)
 }

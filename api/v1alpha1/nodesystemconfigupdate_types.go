@@ -83,12 +83,18 @@ type Sysctl struct {
 	Vm     VmSysctl     `json:"vm,omitempty"`
 }
 
+type Hugepages struct {
+	Hugepages1Gi int `json:"hugepages-1Gi,omitempty"`
+	Hugepages2Mi int `json:"hugepages-2Mi,omitempty"`
+}
+
 // NodeSystemConfigUpdateSpec defines the desired state of NodeSystemConfigUpdate
 type NodeSystemConfigUpdateSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	Hugepages    Hugepages         `json:"hugepages,omitempty"`
 	Sysctl       Sysctl            `json:"sysctl,omitempty"`
 }
 
@@ -97,8 +103,8 @@ type NodeSystemConfigUpdateStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	LastUpdateTime  string          `json:"lastUpdateTime,omitempty"`
-	NodesConfigured map[string]bool `json:"nodesConfigured,omitempty"`
+	LastUpdateTime  string                     `json:"lastUpdateTime,omitempty"`
+	NodesConfigured map[string]map[string]bool `json:"nodesConfigured,omitempty"`
 	//AppliedConfigurationDetails Sysctl    `json:"sysctl,omitempty"`
 }
 

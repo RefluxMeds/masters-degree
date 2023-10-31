@@ -77,6 +77,9 @@ spec:
         - name: sysctls
           mountPath: /sysctls
           readOnly: false
+        - name: grub-config
+          mountPath: /cfg/grub
+          readOnly: false
         securityContext:
           runAsUser: 0
           privileged: true
@@ -121,3 +124,7 @@ spec:
         hostPath:
           path: /proc/sys
           type: Directory
+      - name: grub-config
+        hostPath:
+          path: /etc/default/grub
+          type: File

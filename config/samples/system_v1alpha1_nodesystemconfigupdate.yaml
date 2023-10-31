@@ -3,15 +3,16 @@ kind: NodeSystemConfigUpdate
 metadata:
   labels:
     app.kubernetes.io/name: nodesystemconfigupdate
-    app.kubernetes.io/instance: nodesystemconfigupdate-sample
-    app.kubernetes.io/part-of: masters-degree
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: masters-degree
+  annotations:
+    autoremediate: "true"
   name: nodesystemconfigupdate-sample
 spec:
   nodeSelector:
     highTp: "true"
     mellanoxNIC: "true"
+  hugepages:
+    hugepages-1Gi: 0
+    hugepages-2Mi: 2
   sysctl:
     fs:
       inotify:
@@ -43,6 +44,7 @@ spec:
 #        sctp_mem: [24709599, 32946135, 49419198]
     vm:
       max_map_count: 65530
+  
 
 #status:
 #  lastUpdateTime: string
