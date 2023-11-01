@@ -20,16 +20,19 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	kubernetes "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes"
 	rest "k8s.io/client-go/rest"
+	"k8s.io/klog"
 	drain "k8s.io/kubectl/pkg/drain"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -133,9 +136,6 @@ func processSysctlFields(field interface{}, basePath string) error {
 		}
 
 	} else {
-		//fieldName := basePath[strings.LastIndex(basePath, "/")+1:]
-		//filePath := strings.Join([]string{basePath, fieldName}, "/")
-
 		currentValue, err := readValueFromFile(strings.ToLower(basePath))
 		if err != nil {
 			return err
@@ -178,7 +178,7 @@ func writeValueToFile(filePath string, value interface{}) error {
 }
 
 func processHugePages(hptype string, hpvalue int) (bool, error) {
-	grubFile := "/cfg/grub"
+	grubFile := "/host/etc/default/grub"
 
 	data, err := os.ReadFile(grubFile)
 	if err != nil {
@@ -234,16 +234,25 @@ func onPodDeletedOrEvicted(pod *corev1.Pod, usingEviction bool) {
 	} else {
 		verbString = "Deleted"
 	}
+	msg := fmt.Sprintf("pod: %s:%s %s from node: %s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name, verbString, pod.Spec.NodeName)
+	klog.Info(msg)
+}
 
-	msg := fmt.Sprintf("Pod: %s:%s %s from node: %s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name, verbString, pod.Spec.NodeName)
-	fmt.Println(msg)
+// writer implements io.Writer interface as a pass-through for klog.
+type writer struct {
+	logFunc func(args ...interface{})
+}
+
+// Write passes string(p) into writer's logFunc and always returns len(p)
+func (w writer) Write(p []byte) (n int, err error) {
+	w.logFunc(string(p))
+	return len(p), nil
 }
 
 // NodeSystemConfigUpdateReconciler reconciles a NodeSystemConfigUpdate object
 type NodeSystemConfigUpdateReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	drainer *drain.Helper
+	Scheme *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups=system.masters.degree,resources=nodesystemconfigupdates,verbs=get;list;watch;create;update;patch;delete
@@ -251,10 +260,11 @@ type NodeSystemConfigUpdateReconciler struct {
 //+kubebuilder:rbac:groups=system.masters.degree,resources=nodesystemconfigupdates/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups="",resources=nodes/status,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=pods/status,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="apps",resources=daemonsets,verbs=get;list;watch
-//+kubebuilder:rbac:groups="apps",resources=daemonsets/status,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list
+//+kubebuilder:rbac:groups="",resources=pods/status,verbs=get;list
+//+kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create
+//+kubebuilder:rbac:groups="apps",resources=daemonsets,verbs=get;list
+//+kubebuilder:rbac:groups="apps",resources=daemonsets/status,verbs=get;list
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -392,12 +402,69 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 		nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["rebootRequired"] == true {
 		l.Info("PROCESSING_AUTOREMEDIATION", "REBOOT_SEQ", nodeSysConfUpdate.ObjectMeta.Annotations["autoremediate"])
 
-		l.Info("PRINTVARS", "DRAINER", r.drainer, "NODENAME", nodeData.ObjectMeta.GetName())
-		if err := drain.RunCordonOrUncordon(r.drainer, nodeData, true); err != nil {
+		if err := syscall.PivotRoot("/host", "/host/.oldroot"); err != nil {
 			return ctrl.Result{}, err
 		}
-		l.Info("PRINTVARS", "DRAINER", r.drainer, "NODENAME", nodeData.ObjectMeta.GetName())
-		if err := drain.RunNodeDrain(r.drainer, nodeData.ObjectMeta.GetName()); err != nil {
+
+		cmdGrub := exec.Command("/usr/sbin/grub-mkconfig", "-o", "/boot/grub/grub.cfg")
+
+		if err := cmdGrub.Run(); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := syscall.PivotRoot(".oldroot", ".oldroot/host"); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		config, err := rest.InClusterConfig()
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		clientset, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		helper := &drain.Helper{
+			Client:                clientset,
+			Force:                 true,
+			DeleteEmptyDirData:    true,
+			IgnoreAllDaemonSets:   true,
+			GracePeriodSeconds:    -1,
+			Timeout:               5 * time.Minute,
+			Ctx:                   ctx,
+			Out:                   writer{klog.Info},
+			ErrOut:                writer{klog.Error},
+			OnPodDeletedOrEvicted: onPodDeletedOrEvicted,
+		}
+
+		if err := drain.RunCordonOrUncordon(helper, nodeData, true); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := drain.RunNodeDrain(helper, nodeData.ObjectMeta.GetName()); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := syscall.PivotRoot("/host", "/host/.oldroot"); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		cmdReboot := exec.Command("/usr/sbin/shutdown", "-r", "+3", "'Operator rebooting for configuration apply'")
+
+		if err := cmdReboot.Run(); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := syscall.PivotRoot(".oldroot", ".oldroot/host"); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		l.Info("AUTOREMEDIATION_PROCESSED", "REBOOT_SCHEDULED", true)
+
+		nodeSysConfUpdate.Status.NodesConfigured[os.Getenv("NODENAME")]["rebootRequired"] = false
+		if err := r.Status().Update(ctx, nodeSysConfUpdate); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -405,33 +472,8 @@ func (r *NodeSystemConfigUpdateReconciler) Reconcile(ctx context.Context, req ct
 	return ctrl.Result{Requeue: true, RequeueAfter: 30 * time.Second}, nil
 }
 
-func initDrainer(r *NodeSystemConfigUpdateReconciler, config *rest.Config) error {
-	r.drainer = &drain.Helper{}
-	r.drainer.Force = true
-	r.drainer.DeleteEmptyDirData = true
-	r.drainer.IgnoreAllDaemonSets = true
-	r.drainer.GracePeriodSeconds = -1
-	r.drainer.Timeout = time.Minute * 5
-
-	cs, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return err
-	}
-
-	r.drainer.Client = cs
-	r.drainer.Ctx = context.Background()
-
-	r.drainer.OnPodDeletedOrEvicted = onPodDeletedOrEvicted
-
-	return nil
-}
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeSystemConfigUpdateReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	err := initDrainer(r, mgr.GetConfig())
-	if err != nil {
-		return err
-	}
 	pred := predicate.GenerationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&systemv1alpha1.NodeSystemConfigUpdate{}).

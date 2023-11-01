@@ -29,25 +29,21 @@ rules:
   resources:
   - pods
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
-  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/eviction
+  verbs:
+  - create
 - apiGroups:
   - ""
   resources:
   - pods/status
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - apps
   resources:
@@ -55,7 +51,6 @@ rules:
   verbs:
   - get
   - list
-  - watch
 - apiGroups:
   - apps
   resources:
@@ -63,7 +58,6 @@ rules:
   verbs:
   - get
   - list
-  - watch
 - apiGroups:
   - system.masters.degree
   resources:
